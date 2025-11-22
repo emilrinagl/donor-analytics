@@ -9,3 +9,10 @@
 
 *.xml
 *.iml
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Streamlit data
+.streamlit/
