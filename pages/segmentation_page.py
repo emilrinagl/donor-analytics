@@ -7,6 +7,12 @@ st.caption("This page will segment donors into clusters once implemented.")
 
 st.info("TODO: Implement things that segments donors into interesting groups/charts and visualize them.")
 
+# api usage example:
+api = get_api_client()
+donations = api.get_donations()
+df = pd.DataFrame(donations)
+
+# execute this command to run app: python -m streamlit run main.py
 
 #chatgpt test
 import streamlit as st
