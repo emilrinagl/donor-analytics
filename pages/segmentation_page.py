@@ -1,20 +1,20 @@
-import pandas as pd
-import streamlit as st
+# import pandas as pd
+# import streamlit as st
 
-from src.core.state import get_api_client
+# from src.core.state import get_api_client
 
-st.caption("This page will segment donors into clusters once implemented.")
+# st.caption("This page will segment donors into clusters once implemented.")
 
-st.info("TODO: Implement things that segments donors into interesting groups/charts and visualize them.")
+# st.info("TODO: Implement things that segments donors into interesting groups/charts and visualize them.")
 
-# api usage example:
-api = get_api_client()
-donations = api.get_donations()
-df = pd.DataFrame(donations)
+# # api usage example:
+# api = get_api_client()
+# donations = api.get_donations()
+# df = pd.DataFrame(donations)
 
 # execute this command to run app: python -m streamlit run main.py
 
-#chatgpt test
+# chatgpt test
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -28,7 +28,7 @@ from src.core.layout import sidebar_footer
 
 # ----- Layout -----
 sidebar_footer()
-st.title("🧩 Segmentation")
+# st.title("🧩 Segmentation")
 st.caption("Segmentiert Spender in Cluster, um Outreach zu priorisieren.")
 
 api = get_api_client()
@@ -41,29 +41,52 @@ donations = api.get_donations()  # erwartet Liste von Dicts
 # donors = api.get_donors()      # optional, falls ihr Kontaktdaten getrennt habt
 
 df = pd.DataFrame(donations)
+# Mappe CSV-Spalten auf interne Standardnamen
+column_mapping = {
+    "Kontakt-ID": "donor_id",
+    "Getätigt am Datum": "donation_date",
+    # <-- falls Spalte anders heißt (z.B. "Betrag CHF"), hier anpassen
+    "Betrag": "amount",
+}
 
-# =========================================================
-# Schritt B: Validieren + Cleanen
-# =========================================================
-required_cols = {"donor_id", "donation_date", "amount"}
-if not required_cols.issubset(df.columns):
-    st.error(f"Fehlende Spalten. Benötigt: {required_cols}")
+# Prüfen, ob diese Originalspalten überhaupt existieren
+missing_orig = [c for c in column_mapping.keys() if c not in df.columns]
+if missing_orig:
+    st.error(f"CSV/Mock API fehlt folgende Spalten: {missing_orig}")
     st.stop()
 
-df["donation_date"] = pd.to_datetime(df["donation_date"], errors="coerce")
-df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+# Spalten umbenennen
+df = df.rename(columns=column_mapping)
 
+# st.subheader("DEBUG – Rohdaten vor Cleaning")
+st.dataframe(df[["donor_id", "donation_date", "amount"]].head(20))
+
+
+# --- Cleaning ---
+df["donation_date"] = pd.to_datetime(
+    df["donation_date"], errors="coerce", dayfirst=True)
+
+# Beträge von deutschem Format ("1.234,56") nach Standard ("1234.56") bringen
+amount_str = df["amount"].astype(str)
+amount_str = amount_str.str.replace(
+    ".", "", regex=False)   # Tausenderpunkt entfernen
+amount_str = amount_str.str.replace(",", ".", regex=False)  # Komma -> Punkt
+
+df["amount"] = pd.to_numeric(amount_str, errors="coerce")
+
+# Entferne ungültige oder negative Werte
 df = df.dropna(subset=["donor_id", "donation_date", "amount"])
 df = df[df["amount"] > 0]
 
 if df.empty:
-    st.warning("Keine gültigen Spenden gefunden.")
+    st.warning("No valid donations found after cleaning.")
     st.stop()
 
 # =========================================================
 # Schritt C: RFM Features pro Spender
 # =========================================================
-ref_date = df["donation_date"].max()  # Referenz = letzter Spendenzeitpunkt im Datensatz
+# Referenz = letzter Spendenzeitpunkt im Datensatz
+ref_date = df["donation_date"].max()
 
 rfm = (
     df.groupby("donor_id")
@@ -96,7 +119,8 @@ X = scaler.fit_transform(features)
 k = st.sidebar.slider("Anzahl Cluster (k)", 2, 8, 4)
 
 if len(rfm) < k:
-    st.warning(f"Zu wenige Spender ({len(rfm)}) für k={k}. Bitte k reduzieren.")
+    st.warning(
+        f"Zu wenige Spender ({len(rfm)}) für k={k}. Bitte k reduzieren.")
     st.stop()
 
 km = KMeans(n_clusters=k, random_state=42, n_init="auto")
@@ -120,33 +144,35 @@ summary = (
 summary["frequency_mean"] = np.expm1(summary["frequency_mean"])
 summary["monetary_mean"] = np.expm1(summary["monetary_mean"])
 
-rec_q  = summary["recency_mean"].quantile([0.33, 0.67])
+rec_q = summary["recency_mean"].quantile([0.33, 0.67])
 freq_q = summary["frequency_mean"].quantile([0.33, 0.67])
-mon_q  = summary["monetary_mean"].quantile([0.33, 0.67])
+mon_q = summary["monetary_mean"].quantile([0.33, 0.67])
+
 
 def label_cluster(row):
     # Champions: sehr kürzlich, sehr häufig, sehr viel
     if (row["recency_mean"] <= rec_q.loc[0.33] and
         row["frequency_mean"] >= freq_q.loc[0.67] and
-        row["monetary_mean"] >= mon_q.loc[0.67]):
+            row["monetary_mean"] >= mon_q.loc[0.67]):
         return "Champions / Core Supporters"
 
     # Recent one-timers: kürzlich, aber selten + wenig
     if (row["recency_mean"] <= rec_q.loc[0.33] and
-        row["frequency_mean"] <= freq_q.loc[0.33]):
+            row["frequency_mean"] <= freq_q.loc[0.33]):
         return "Recent One-Timers"
 
     # Lapsed big donors: lange her, aber hoher Betrag
     if (row["recency_mean"] >= rec_q.loc[0.67] and
-        row["monetary_mean"] >= mon_q.loc[0.67]):
+            row["monetary_mean"] >= mon_q.loc[0.67]):
         return "Lapsed Big Donors"
 
     # Lost donors: lange her, selten
     if (row["recency_mean"] >= rec_q.loc[0.67] and
-        row["frequency_mean"] <= freq_q.loc[0.33]):
+            row["frequency_mean"] <= freq_q.loc[0.33]):
         return "Lost Donors"
 
     return "Potential Loyalists"
+
 
 summary["segment"] = summary.apply(label_cluster, axis=1)
 rfm = rfm.merge(summary[["cluster", "segment"]], on="cluster", how="left")
